@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - 'releases/*'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Lint, typecheck, test, build
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: ['24']
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v5
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Format check
+        run: npm run format:check
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Build action bundle
+        run: |
+          rm -rf dist
+          npm run build
+
+      - name: Verify dist/ is up to date
+        id: diff
+        run: |
+          if ! git diff --ignore-cr-at-eol --exit-code -- dist/; then
+            echo "::error::dist/ is out of date. Run 'npm run build' locally and commit the result."
+            exit 1
+          fi
+          # Also surface any untracked files inside dist/ (orphans ncc didn't regenerate).
+          untracked=$(git ls-files --others --exclude-standard -- dist/)
+          if [ -n "$untracked" ]; then
+            echo "::error::Untracked files in dist/:"
+            echo "$untracked"
+            exit 1
+          fi
+
+      - name: Upload dist/ on failure
+        if: ${{ failure() && steps.diff.conclusion == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.node-version }}
+          path: dist/

@@ -1,57 +1,58 @@
-# Github Runner Fallback Action
+# Runner Fallback Action
 
 <p align="center">
-  <a href="https://github.com/mikehardy/runner-fallback-action/actions"><img alt="javscript-action status" src="https://github.com/mikehardy/runner-fallback-action/workflows/units-test/badge.svg"></a>
+  <a href="https://github.com/dodi-smart/runner-fallback-action/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/dodi-smart/runner-fallback-action/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="https://github.com/dodi-smart/runner-fallback-action/actions/workflows/codeql-analysis.yml"><img alt="CodeQL" src="https://github.com/dodi-smart/runner-fallback-action/actions/workflows/codeql-analysis.yml/badge.svg"></a>
 </p>
 
-Github action to determine the availability of self-hosted runners, and fallback to a GitHub runner if the primary runners are offline.
+GitHub Action that determines the availability of self-hosted runners and falls back to a GitHub-hosted runner when the primary runners are offline or busy.
 
-This action uses [GitHub API](https://docs.github.com/en/rest/actions/self-hosted-runners?apiVersion=2022-11-28#list-self-hosted-runners-for-a-repository) to check the statuses of self hosted-runners that match specific labels, and outputs the runner label(s), or a fallback runner if the self-hosted runner(s) is unavailable.
+It calls the [GitHub Self-Hosted Runners API](https://docs.github.com/en/rest/actions/self-hosted-runners?apiVersion=2022-11-28#list-self-hosted-runners-for-a-repository) to inspect runners that match a set of labels, then emits the runner label(s) to use — or the fallback runner — as a JSON-encoded string array that can be consumed via `fromJson()` in a downstream job's `runs-on`.
 
-The API used requires an access token with org admin rights, for example a classic Personal Access Token with org:admin scope selected.
+The API requires an access token with `org:admin` rights, for example a classic Personal Access Token with the `org:admin` scope selected.
 
-This output can then used on the `runs-on` property of subsequent jobs.
+## Runtime
 
-Note: In order to support an array of labels for the `runs-on` field, the output is formatted as a JSON string and needs to be parsed using `fromJson`. See example usage below.
+This action runs on the `node24` runtime, which becomes the GitHub Actions default on **2026-06-16**. Hosted runners provide Node 24 — consumers do not need to install anything.
 
 ## Usage
 
-### ✏️ Inputs
+### Inputs
 
 #### Required
 
-|       Name        |                                          Description                                                       |
-| ----------------- | ---------------------------------------------------------------------------------------------------------- |
-|  `github-token`   | A token that can access the `list action runners` for the given context (e.g. user repo, org, enterprise). |
-|  `primary-runner` | A comma separated list of labels for the _primary_ runner (e.g. 'self-hosted,linux').                      |
-| `fallback-runner` | A comma separated list of labels for the _fallback_ runner (e.g. 'self-hosted,linux').                     |
+| Name              | Description                                                                                               |
+| ----------------- | --------------------------------------------------------------------------------------------------------- |
+| `github-token`    | A token with `list action runners` access for the given context (user repo, organization, or enterprise). |
+| `primary-runner`  | Comma-separated labels for the **primary** runner (e.g. `self-hosted,linux`).                             |
+| `fallback-runner` | Name or comma-separated labels for the **fallback** runner (e.g. `ubuntu-latest`).                        |
 
 #### Optional
 
----
+Runners can be scoped at three levels: repository, organization, or enterprise. The following options switch the API surface the action queries. **Only one of `organization` or `enterprise` may be supplied.**
 
-There are three ways runners can be allowed to run against a repo: User, Organization, Enterprise. The following options allow you to switch the implementation to use one of the other specified levels. **_Note:_** You can only provide one of the values.
+| Name           | Description                                               |
+| -------------- | --------------------------------------------------------- |
+| `organization` | The name of the GitHub organization (e.g. `dodi-smart`).  |
+| `enterprise`   | The name of the GitHub enterprise (e.g. `My-Github-Ent`). |
 
-|       Name       |                     Description                                    |
-| ---------------- | ------------------------------------------------------------------ |
-| `organization`   | The name of the github organization (e.g. `My-Github-Org`)         |
-| `enterprise`     | The name of the github enterprise (e.g. `My-Github-Ent`)           |
+You can ask the action to fall back even when primaries are online, but **busy**. This is useful when self-hosted capacity is the cheap-fast path and public runners are the safety net.
 
-It is possible that you want to use the fallback runners even if the primary runners are online,
-if the primary runners are busy. You may optionally configure this action to fallback if there
-are not enough free primaries, for example if you are adding self-hosted primaries to increase capacity, but the fallbacks are public runners in a public repo so you don't mind using them as needed.
+| Name                 | Description                                                 |
+| -------------------- | ----------------------------------------------------------- |
+| `primaries-required` | Minimum non-busy primaries required; falls back below this. |
 
-|       Name           |                     Description                 |
-| -------------------- | ----------------------------------------------- |
-| `primaries-required` | minimum non-busy primaries count, else fallback |
+You can also configure the action to fall back silently on **any** error (e.g. expired token, GitHub API outage) so CI keeps moving. Default is `false`.
 
-You may want the action to use the fallback runner, if correctly configured, if there are any
-errors at all. This makes it so the action won't block CI runs even if (for example) the
-github token is unavailable or expires. Default is false.
+| Name                | Description                                  |
+| ------------------- | -------------------------------------------- |
+| `fallback-on-error` | Use the fallback runner if any error occurs. |
 
-|       Name          |                     Description                 |
-| ------------------- | ----------------------------------------------- |
-| `fallback-on-error` | use the fallback runner if there are any errors |
+### Outputs
+
+| Name         | Description                                                                                            |
+| ------------ | ------------------------------------------------------------------------------------------------------ |
+| `use-runner` | Selected runner labels as a JSON-encoded string array, ready to consume via `fromJson()` in `runs-on`. |
 
 ### Example
 
@@ -63,32 +64,32 @@ jobs:
     concurrency:
       # Runner choice must happen serially for the "primaries-required" logic
       # to be up to date in the context of one self-hosted runner that may be
-      # used for multiple workflows triggered off the same workflow event
+      # used for multiple workflows triggered off the same workflow event.
       group: runner-determination
       cancel-in-progress: false
     outputs:
       runner: ${{ steps.set-runner.outputs.use-runner }}
     steps:
       - name: Wait for possible parallel workflow run job startup lag
-        # After runner choice, the job that will use it has unavoidable job startup lag
-        # Wait for that job start / runner state change before we choose the runner for this run
+        # After runner choice, the job that will use it has unavoidable job startup lag.
+        # Wait for that job start / runner state change before we choose the runner for this run.
         run: sleep 15
       - name: Use self-hosted runner if online and not busy, otherwise public runner
         id: set-runner
-        uses: mikehardy/runner-fallback-action@v1
+        uses: dodi-smart/runner-fallback-action@v2
         with:
-          organization: "ankidroid"
+          organization: 'dodi-smart'
           # list of tags a runner must match to be considered a primary
-          primary-runner: "macos-selfhosted"
-          # a single tag that will select a runner to fallback to
-          fallback-runner: "macos-26"
-          # optional, fallback if fewer available, big batch jobs or multiple workflows perhaps
+          primary-runner: 'self-hosted,linux'
+          # a single tag that will select a runner to fall back to
+          fallback-runner: 'ubuntu-latest'
+          # optional: fall back if fewer non-busy primaries are available
           primaries-required: 1
-          # optional, fallback if token expires or github API fails
+          # optional: fall back if the token expires or the GitHub API fails
           fallback-on-error: true
-          # Must have org:admin permissions, github runner APIs require it
-          # Note that Actions secrets and Dependabot secrets are separate
-          github-token: ${{ secrets.MIKE_HARDY_ORG_ADMIN_KEY }}
+          # Must have org:admin permissions — GitHub's runner APIs require it.
+          # Note that Actions secrets and Dependabot secrets are separate.
+          github-token: ${{ secrets.ORG_ADMIN_TOKEN }}
 
   another-job:
     needs: determine-runner
@@ -98,14 +99,17 @@ jobs:
         run: echo "Doing something on ${{ needs.determine-runner.outputs.runner }}"
 ```
 
-- Here is an example of the action in use directly: <https://github.com/ankidroid/Anki-Android-Backend/blob/main/.github/workflows/build-release.yml>
+## Development
 
-- Here is an example where the runner is used in a second preparation step that builds a dynamic job matrix where the runner is used in javascript: <https://github.com/ankidroid/Anki-Android-Backend/blob/main/.github/workflows/build-quick.yml>
+```bash
+npm ci
+npm run all   # lint + format:check + typecheck + test + build
+```
 
-## Credit
+Source lives in `src/` (TypeScript, ESM). `dist/index.js` is the bundled action entry point and is regenerated by `npm run build` via [`@vercel/ncc`](https://github.com/vercel/ncc). CI fails if `dist/` is out of sync with `src/`.
 
-- this action is based on the pattern described by @ianpurton on [this feature request thread](https://github.com/orgs/community/discussions/20019#discussioncomment-5414593).
+## Credits
 
-- this action was originally developed by @jimmygchen - thanks Jimmy! [He has decided to archive his original action](https://github.com/jimmygchen/runner-fallback-action/pull/31#issuecomment-3454512133), and this fork is the successor
-
-- @O-Mutt contributed the organization-level and enterprise-level self-hosted runner feature, thanks Matt!
+- Pattern originally described by [@ianpurton](https://github.com/ianpurton) in [community discussion #20019](https://github.com/orgs/community/discussions/20019#discussioncomment-5414593).
+- Original action developed by [@jimmygchen](https://github.com/jimmygchen), maintained by [@mikehardy](https://github.com/mikehardy), modernized for Node 24 + TypeScript by [Asen Lekov (@azlekov)](https://github.com/azlekov), and republished under the [dodi-smart](https://github.com/dodi-smart) org.
+- Organization-level and enterprise-level runner support contributed by [@O-Mutt](https://github.com/O-Mutt).

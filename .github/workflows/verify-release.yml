@@ -1,0 +1,97 @@
+name: Verify Release
+
+# Verifies the published action end-to-end by referencing it as a
+# third-party consumer would: dodi-smart/runner-fallback-action@main.
+#
+# GitHub Actions does NOT allow expressions in `uses:` — the ref must
+# be a literal string so policies on third-party actions can be enforced
+# before the workflow runs. We therefore pin to @main, which after a
+# release-merge is exactly the released commit. To verify a specific
+# tag (e.g. v2.0.0) or PR branch, edit the refs in this file on a
+# throwaway branch and dispatch from there.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  detect-repo-runners:
+    name: Detect repo-scoped self-hosted runners
+    runs-on: ubuntu-latest
+    outputs:
+      use-runner: ${{ steps.detect.outputs.use-runner }}
+    steps:
+      - id: detect
+        uses: dodi-smart/runner-fallback-action@main
+        with:
+          primary-runner: 'self-hosted,linux'
+          fallback-runner: 'ubuntu-latest'
+          github-token: ${{ secrets.TEST_GITHUB_TOKEN }}
+      - name: Assert output is parseable JSON
+        run: |
+          echo "Selected: ${{ steps.detect.outputs.use-runner }}"
+          echo '${{ steps.detect.outputs.use-runner }}' | jq -e 'type == "array" and length > 0'
+
+  detect-org-runners:
+    name: Detect org-scoped self-hosted runners
+    runs-on: ubuntu-latest
+    steps:
+      - id: detect
+        uses: dodi-smart/runner-fallback-action@main
+        with:
+          primary-runner: 'self-hosted,linux'
+          fallback-runner: 'ubuntu-latest'
+          organization: 'dodi-smart'
+          github-token: ${{ secrets.TEST_GITHUB_TOKEN }}
+      - name: Assert output is parseable JSON
+        run: |
+          echo "Selected: ${{ steps.detect.outputs.use-runner }}"
+          echo '${{ steps.detect.outputs.use-runner }}' | jq -e 'type == "array" and length > 0'
+
+  detect-with-required-primaries:
+    name: Detect with primaries-required threshold
+    runs-on: ubuntu-latest
+    steps:
+      - id: detect
+        uses: dodi-smart/runner-fallback-action@main
+        with:
+          primary-runner: 'self-hosted,linux'
+          fallback-runner: 'ubuntu-latest'
+          primaries-required: '1'
+          github-token: ${{ secrets.TEST_GITHUB_TOKEN }}
+      - name: Assert action did not fail
+        run: |
+          echo "Selected: ${{ steps.detect.outputs.use-runner }}"
+          echo '${{ steps.detect.outputs.use-runner }}' | jq -e 'type == "array" and length > 0'
+
+  run-on-detected-runner:
+    name: Execute job on the detected runner
+    needs: detect-repo-runners
+    runs-on: ${{ fromJson(needs.detect-repo-runners.outputs.use-runner) }}
+    steps:
+      - name: Print runner info
+        run: |
+          echo "Running on: ${{ needs.detect-repo-runners.outputs.use-runner }}"
+          uname -a
+          node --version || true
+
+  fallback-on-error:
+    name: Fallback when token is invalid
+    runs-on: ubuntu-latest
+    steps:
+      - id: detect
+        uses: dodi-smart/runner-fallback-action@main
+        with:
+          primary-runner: 'self-hosted,linux'
+          fallback-runner: 'ubuntu-latest'
+          fallback-on-error: 'true'
+          github-token: 'invalid-token-on-purpose'
+      - name: Assert fallback was returned
+        run: |
+          echo "Selected: ${{ steps.detect.outputs.use-runner }}"
+          echo '${{ steps.detect.outputs.use-runner }}' | jq -e '. == ["ubuntu-latest"]'
