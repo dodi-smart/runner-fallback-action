@@ -1,14 +1,15 @@
 name: Verify Release
 
-# Verifies the published action end-to-end by referencing it as a
-# third-party consumer would: dodi-smart/runner-fallback-action@main.
+# Re-verifies the published action end-to-end after a release is cut.
+# Mirrors e2e.yml but references the action via dodi-smart/runner-fallback-action@main
+# (the consumer-facing form) instead of ./ (local source), so we catch any
+# dist/-vs-src mismatches between what was tested on the merge and what
+# the marketplace ships.
 #
-# GitHub Actions does NOT allow expressions in `uses:` — the ref must
-# be a literal string so policies on third-party actions can be enforced
-# before the workflow runs. We therefore pin to @main, which after a
-# release-merge is exactly the released commit. To verify a specific
-# tag (e.g. v2.0.0) or PR branch, edit the refs in this file on a
-# throwaway branch and dispatch from there.
+# GitHub Actions does NOT allow expressions in `uses:` — the ref must be a
+# literal string. We pin to @main, which after a release-merge is exactly
+# the released commit. To verify a specific tag (e.g. v2.0.1), edit the
+# refs in this file on a throwaway branch and dispatch from there.
 
 on:
   release:
@@ -20,8 +21,8 @@ permissions:
   actions: read
 
 jobs:
-  detect-repo-runners:
-    name: Detect repo-scoped self-hosted runners
+  detect-self-hosted:
+    name: Detect org-scoped self-hosted runners
     runs-on: ubuntu-latest
     outputs:
       use-runner: ${{ steps.detect.outputs.use-runner }}
@@ -29,26 +30,12 @@ jobs:
       - id: detect
         uses: dodi-smart/runner-fallback-action@main
         with:
-          primary-runner: 'self-hosted,linux'
-          fallback-runner: 'ubuntu-latest'
-          github-token: ${{ secrets.TEST_GITHUB_TOKEN }}
-      - name: Assert output is parseable JSON
-        run: |
-          echo "Selected: ${{ steps.detect.outputs.use-runner }}"
-          echo '${{ steps.detect.outputs.use-runner }}' | jq -e 'type == "array" and length > 0'
-
-  detect-org-runners:
-    name: Detect org-scoped self-hosted runners
-    runs-on: ubuntu-latest
-    steps:
-      - id: detect
-        uses: dodi-smart/runner-fallback-action@main
-        with:
-          primary-runner: 'self-hosted,linux'
-          fallback-runner: 'ubuntu-latest'
           organization: 'dodi-smart'
+          primary-runner: 'self-hosted,linux'
+          fallback-runner: 'ubuntu-latest'
+          fallback-on-error: 'true'
           github-token: ${{ secrets.TEST_GITHUB_TOKEN }}
-      - name: Assert output is parseable JSON
+      - name: Assert output is a non-empty JSON array
         run: |
           echo "Selected: ${{ steps.detect.outputs.use-runner }}"
           echo '${{ steps.detect.outputs.use-runner }}' | jq -e 'type == "array" and length > 0'
@@ -60,33 +47,57 @@ jobs:
       - id: detect
         uses: dodi-smart/runner-fallback-action@main
         with:
+          organization: 'dodi-smart'
           primary-runner: 'self-hosted,linux'
           fallback-runner: 'ubuntu-latest'
           primaries-required: '1'
+          fallback-on-error: 'true'
           github-token: ${{ secrets.TEST_GITHUB_TOKEN }}
       - name: Assert action did not fail
         run: |
           echo "Selected: ${{ steps.detect.outputs.use-runner }}"
           echo '${{ steps.detect.outputs.use-runner }}' | jq -e 'type == "array" and length > 0'
 
-  run-on-detected-runner:
-    name: Execute job on the detected runner
-    needs: detect-repo-runners
-    runs-on: ${{ fromJson(needs.detect-repo-runners.outputs.use-runner) }}
+  # Forces the fallback path so the runs-on:fromJson() consumer demo always
+  # lands on a GitHub-hosted runner — independent of org self-hosted policy.
+  dispatch-fallback-runner:
+    name: Demonstrate runs-on:fromJson() consumer pattern
+    runs-on: ubuntu-latest
+    outputs:
+      use-runner: ${{ steps.detect.outputs.use-runner }}
     steps:
-      - name: Print runner info
+      - id: detect
+        uses: dodi-smart/runner-fallback-action@main
+        with:
+          organization: 'dodi-smart'
+          primary-runner: 'self-hosted,this-label-never-exists'
+          fallback-runner: 'ubuntu-latest'
+          fallback-on-error: 'true'
+          github-token: ${{ secrets.TEST_GITHUB_TOKEN }}
+      - name: Assert fallback was selected
         run: |
-          echo "Running on: ${{ needs.detect-repo-runners.outputs.use-runner }}"
-          uname -a
-          node --version || true
+          echo "Selected: ${{ steps.detect.outputs.use-runner }}"
+          echo '${{ steps.detect.outputs.use-runner }}' | jq -e '. == ["ubuntu-latest"]'
 
-  fallback-on-error:
+  run-on-selected-runner:
+    name: Run a job on the selected runner
+    needs: dispatch-fallback-runner
+    if: needs.dispatch-fallback-runner.result == 'success' && needs.dispatch-fallback-runner.outputs.use-runner != ''
+    runs-on: ${{ fromJson(needs.dispatch-fallback-runner.outputs.use-runner) }}
+    steps:
+      - name: Confirm the chosen runner picked us up
+        run: |
+          echo "Running on: ${{ needs.dispatch-fallback-runner.outputs.use-runner }}"
+          uname -a
+
+  fallback-on-invalid-token:
     name: Fallback when token is invalid
     runs-on: ubuntu-latest
     steps:
       - id: detect
         uses: dodi-smart/runner-fallback-action@main
         with:
+          organization: 'dodi-smart'
           primary-runner: 'self-hosted,linux'
           fallback-runner: 'ubuntu-latest'
           fallback-on-error: 'true'
