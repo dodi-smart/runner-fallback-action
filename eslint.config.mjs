@@ -1,36 +1,38 @@
-import { defineConfig, globalIgnores } from "eslint/config";
-import globals from "globals";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-import js from "@eslint/js";
-import { FlatCompat } from "@eslint/eslintrc";
+import js from '@eslint/js';
+import tseslint from 'typescript-eslint';
+import prettier from 'eslint-config-prettier';
+import globals from 'globals';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const compat = new FlatCompat({
-    baseDirectory: __dirname,
-    recommendedConfig: js.configs.recommended,
-    allConfig: js.configs.all
-});
-
-export default defineConfig([globalIgnores(["**/dist/"]), {
-    extends: compat.extends("eslint:recommended"),
-    ignores: [
-        "eslint.config.mjs",
-        "dist/"
-    ],
+export default tseslint.config(
+  {
+    ignores: ['dist/', 'lib/', 'node_modules/', 'coverage/'],
+  },
+  js.configs.recommended,
+  ...tseslint.configs.recommended,
+  {
     languageOptions: {
-        globals: {
-            ...globals.commonjs,
-            ...globals.jest,
-            ...globals.node,
-            Atomics: "readonly",
-            SharedArrayBuffer: "readonly",
-        },
-
-        ecmaVersion: 2018,
-        sourceType: "commonjs",
+      ecmaVersion: 2023,
+      sourceType: 'module',
+      globals: {
+        ...globals.node,
+      },
     },
-
-    rules: {},
-}]);
+  },
+  {
+    files: ['src/**/__tests__/**/*.ts'],
+    languageOptions: {
+      globals: {
+        ...globals.jest,
+      },
+    },
+  },
+  {
+    files: ['*.js', '*.mjs'],
+    languageOptions: {
+      globals: {
+        ...globals.node,
+      },
+    },
+  },
+  prettier,
+);

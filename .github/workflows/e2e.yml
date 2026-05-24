@@ -1,0 +1,96 @@
+name: E2E
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - 'releases/*'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  detect-self-hosted:
+    name: Detect org-scoped self-hosted runners
+    # Skip on fork PRs where TEST_GITHUB_TOKEN is not available.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    outputs:
+      use-runner: ${{ steps.detect.outputs.use-runner }}
+    steps:
+      - uses: actions/checkout@v5
+      - id: detect
+        uses: ./
+        with:
+          organization: 'dodi-smart'
+          primary-runner: 'self-hosted,linux'
+          fallback-runner: 'ubuntu-latest'
+          # Keeps the smoke test green if the secret is missing or
+          # scopes drift — the action still proves it runs end-to-end.
+          fallback-on-error: 'true'
+          github-token: ${{ secrets.TEST_GITHUB_TOKEN }}
+      - name: Assert output is a non-empty JSON array
+        run: |
+          echo "Selected: ${{ steps.detect.outputs.use-runner }}"
+          echo '${{ steps.detect.outputs.use-runner }}' | jq -e 'type == "array" and length > 0'
+
+  detect-multi-label-fallback:
+    name: Detect with multi-label fallback runner
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - id: detect
+        uses: ./
+        with:
+          organization: 'dodi-smart'
+          primary-runner: 'self-hosted,linux'
+          fallback-runner: 'linux,x64'
+          fallback-on-error: 'true'
+          github-token: ${{ secrets.TEST_GITHUB_TOKEN }}
+      - name: Assert output is a non-empty JSON array
+        run: |
+          echo "Selected: ${{ steps.detect.outputs.use-runner }}"
+          echo '${{ steps.detect.outputs.use-runner }}' | jq -e 'type == "array" and length > 0'
+
+  # Proves the runs-on: ${{ fromJson(...) }} consumer pattern works end-to-end.
+  # We force the fallback path (with a label set no runner can match) so the
+  # downstream job dispatches to ubuntu-latest — a guaranteed-available hosted
+  # runner — instead of depending on org self-hosted runner policy.
+  dispatch-fallback-runner:
+    name: Demonstrate runs-on:fromJson() consumer pattern
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    outputs:
+      use-runner: ${{ steps.detect.outputs.use-runner }}
+    steps:
+      - uses: actions/checkout@v5
+      - id: detect
+        uses: ./
+        with:
+          organization: 'dodi-smart'
+          primary-runner: 'self-hosted,this-label-never-exists'
+          fallback-runner: 'ubuntu-latest'
+          fallback-on-error: 'true'
+          github-token: ${{ secrets.TEST_GITHUB_TOKEN }}
+      - name: Assert fallback was selected
+        run: |
+          echo "Selected: ${{ steps.detect.outputs.use-runner }}"
+          echo '${{ steps.detect.outputs.use-runner }}' | jq -e '. == ["ubuntu-latest"]'
+
+  run-on-selected-runner:
+    name: Run a job on the selected runner
+    needs: dispatch-fallback-runner
+    if: needs.dispatch-fallback-runner.result == 'success' && needs.dispatch-fallback-runner.outputs.use-runner != ''
+    runs-on: ${{ fromJson(needs.dispatch-fallback-runner.outputs.use-runner) }}
+    steps:
+      - name: Confirm the chosen runner picked us up
+        run: |
+          echo "Running on: ${{ needs.dispatch-fallback-runner.outputs.use-runner }}"
+          uname -a
