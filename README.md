@@ -99,6 +99,38 @@ jobs:
         run: echo "Doing something on ${{ needs.determine-runner.outputs.runner }}"
 ```
 
+## Versioning & releases
+
+Consume the action via the moving major-version tag for automatic non-breaking updates:
+
+```yaml
+uses: dodi-smart/runner-fallback-action@v2
+```
+
+Or pin to an immutable patch release if you need byte-for-byte determinism:
+
+```yaml
+uses: dodi-smart/runner-fallback-action@v2.0.0
+```
+
+Both forms resolve to the same set of inputs and outputs documented above; `@v2` is force-updated on every `v2.x.y` release so you receive `feat` and `fix` updates without editing your workflow.
+
+Releases are fully automated. Whenever a PR lands on `main`, a workflow runs [semantic-release](https://semantic-release.gitbook.io/) which reads new conventional commits, decides the bump (patch/minor/major), creates a GitHub Release with auto-generated notes, and force-updates the major-version tag. The full changelog is published on the [Releases page](https://github.com/dodi-smart/runner-fallback-action/releases).
+
+## Contributing
+
+PR titles must follow [Conventional Commits](https://www.conventionalcommits.org/) — the CI gate enforces this, and the subject becomes the squash-merge commit message that drives release versioning:
+
+| Prefix                                                      | Effect on the next release |
+| ----------------------------------------------------------- | -------------------------- |
+| `feat: ...`                                                 | Minor bump (`v2.1.0`)      |
+| `fix: ...`                                                  | Patch bump (`v2.0.1`)      |
+| `perf:` / `refactor:` / `build:` / `revert:`                | Patch bump                 |
+| `docs:` / `chore:` / `style:` / `test:` / `ci:`             | No release                 |
+| `feat!: ...` / `fix!: ...` / footer with `BREAKING CHANGE:` | Major bump (`v3.0.0`)      |
+
+Subjects must start with a lowercase letter (`fix: handle null labels`, not `Fix: handle null labels`). Optional scope is allowed: `feat(runner): match labels case-insensitively`.
+
 ## Development
 
 ```bash
